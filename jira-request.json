@@ -1,12 +1,7 @@
 {
-  "issue": {
-    "key": "{{issue.key}}",
-    "fields": {
-      "poc_start": "{{issue.fields.customfield_12345}}",
-      "poc_end": "{{issue.fields.customfield_67890}}"
-    }
-  },
-  "comment": {
-    "body": "{{comment.body}}"
-  }
+"key": "{{issue.key}}",
+"cloud_account": "{{issue.customfield_12645}}",
+"cloud_account_region": "{{issue.customfield_12646}}",
+"start_date": "{{issue.customfield_11432}}",
+"comment": {{comment.body.asJsonString}}
 }

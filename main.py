@@ -1,13 +1,13 @@
 from fastapi import FastAPI, Request
 from jira import JIRA
-import os, dotenv, openai, re
+import os, dotenv, openai, json, requests
 from datetime import datetime, timedelta
 
 dotenv.load_dotenv()
 app = FastAPI()
 REPLY_PREFACE = "If you did not request for an extension, please ignore this message."
-AWS_ACCT_MSG = "cloud-aws-dev-cdp-trial"
 
+cloudzero_api_key = os.getenv("CLOUDZERO_API_KEY")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 email = os.getenv("JIRA_EMAIL")
 api_token = os.getenv("JIRA_API_TOKEN")
@@ -20,7 +20,7 @@ jira = JIRA(
 
 def detect_extension(comment):
     prompt = f"""You are a classifier. Decide if this Jira comment is asking
-    for a POC extension. Reply only with 'YES' or 'NO'.
+    for a POC or workshop extension. Reply only with 'YES' or 'NO'.
 
     Comment: {comment}
     """
@@ -33,70 +33,89 @@ def detect_extension(comment):
     result = response.choices[0].message.content.strip().lower()
     return "yes" in result
 
-def delete_comments(first, last):
-    for i in range(first, last+1):
-        print(i)
-        try:
-            comment = jira.comment("CDPAR-811", str(i))
-            comment.delete()
-        except Exception as e:
-            continue
-
-def extract_cloud_account(text):
+def extract_cloud_account(account_str):
     """
-    Extracts a cloud account ID from the comment text.
+    Extracts the actual CloudZero account ID from a prefixed string.
+    Examples:
+        "AWS - cloud-aws-dev-cdp-trial12" -> "cloud-aws-dev-cdp-trial12"
+        "Azure-Field-Product-Experience-1" -> "Azure-Field-Product-Experience-1" (unchanged)
     """
-    pattern = re.escape(AWS_ACCT_MSG) + r"[\w-]*"
-    match = re.search(pattern, text)
-    if match:
-        return match.group(0)
-    return None
+    # If it contains ' - ', assume the last part is the account
+    if ' - ' in account_str:
+        return account_str.split(' - ')[-1].strip()
+    else:
+        return account_str.strip()
 
-def get_acct_and_date_assigned(issue_key):
-    issue = jira.issue(issue_key)
-    for comment in issue.fields.comment.comments:
-        comment_text = comment.body
-        if AWS_ACCT_MSG in comment_text:
-            cloud_acct = extract_cloud_account(comment_text)
-            date_assigned = comment.created[:10]
-            return cloud_acct, date_assigned
-        
-def get_date_assigned(issue_key):
-    issue = jira.issue(issue_key)
-    for comment in issue.fields.comment.comments:
-        comment_text = comment.body
-        if AWS_ACCT_MSG in comment_text:
-            date_assigned = comment.created[:10]
-            return date_assigned
+def get_cost_report(cloud_acct, region, start_date):
+    API_BASE = "https://api.cloudzero.com/v2/billing/costs"
+    headers = {
+        "Authorization": f"Bearer {cloudzero_api_key}",
+        "Accept": "application/json",
+    }
+
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    filters = {"User:Defined:DepartmentName": ["Sales SE Management"]}
+    if region:
+        filters["Region"] = [region]
+
+    params = {
+        "start_date": start_date + "T00:00:00Z",
+        "end_date": yesterday + "T00:00:00Z",
+        "granularity": "daily",
+        "group_by": "User:Defined:AccountName",
+        "filters": json.dumps(filters),
+        "cost_type": "real_cost"
+    }
+
+    all_costs = []
+    cursor = None
+    while True:
+        if cursor:
+            params["cursor"] = cursor
+        resp = requests.get(API_BASE, headers=headers, params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        all_costs.extend(data.get("costs", []))
+        cursor_info = data.get("pagination", {}).get("cursor", {})
+        if cursor_info.get("has_next"):
+            cursor = cursor_info.get("next_cursor")
+        else:
+            break
+
+    # Local filter: only include accounts that start with cloud_acct
+    filtered_costs = [
+        rec for rec in all_costs
+        if any(
+            str(val).startswith(cloud_acct)
+            for key, val in rec.items()
+            if "User:Defined:AccountName" in key
+        )
+    ]
+
+    total_cost = sum(rec.get("cost", 0) for rec in filtered_costs)
+    
+    print(total_cost)
+    return round(total_cost, 2)
 
 @app.post("/webhook")
 async def jira_webhook(request: Request):
     payload = await request.json()
-    print("Received payload:", payload)
-    comment_text = payload['comment']
+    comment_text = payload["comment"]
 
-    # issue_key = payload['issue']['key']
-    issue_key = "CDPAR-803"
+    if REPLY_PREFACE not in comment_text and detect_extension(comment_text):
+        print("Payload:", payload)
 
-    # cloud_acct = payload['issue']['fields']['cloud_account'].split()[0]
-    cloud_acct, date_assigned = get_acct_and_date_assigned(issue_key)
+        cloud_acct = extract_cloud_account(payload["cloud_account"])
+        region = payload["cloud_account_region"]
+        start_date = payload["start_date"]
+        total_cost = get_cost_report(cloud_acct, region, start_date)
 
-    # if REPLY_PREFACE not in comment_text and detect_extension(comment_text):
-    if REPLY_PREFACE not in comment_text:
-        # yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
-        # date_assigned = get_date_assigned(issue_key)
-
-        yesterday = "2025-09-15"
-
-        print(cloud_acct, date_assigned, yesterday)
-
-        reply = "Total cost so far for all regions in account: https://app.cloudzero.com/explorer?activeCostType=real_cost&partitions=costcontext%3AService+Category&dateRange=Custom&startDate="+date_assigned+"T00%3A00%3A00Z&endDate="+yesterday+"T23%3A59%3A59Z&costcontext%3AAccount+Name="+cloud_acct+"+%28755369499673%29&costcontext%3ADepartment+Name=Sales+SE+Management&showRightFlyout=filters \n" + REPLY_PREFACE
+        region_text = f" in {region}" if region else ""
+        reply = f"Total spent so far for {cloud_acct}{region_text} since {start_date}: *${total_cost}*\nDo you need to request for a new budget?\n{REPLY_PREFACE}"
         
-        # jira.add_comment(issue_key, reply)
-        print(reply)
+        issue_key = payload["key"]
+        jira.add_comment(issue_key, reply)
 
         return {"status": "comment added"}
 
     return {"status": "ignored"}
-
-# delete_comments(5713388, 5713487)
