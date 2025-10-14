@@ -115,6 +115,7 @@ async def jira_webhook(request: Request):
         
         issue_key = payload["key"]
         jira.add_comment(issue_key, reply)
+        print(datetime.now(), f"Added comment to {issue_key}")
 
         return {"status": "comment added"}
 
