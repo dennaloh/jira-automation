@@ -101,9 +101,10 @@ def get_cost_report(cloud_acct, region, start_date):
 async def jira_webhook(request: Request):
     payload = await request.json()
     comment_text = payload["comment"]
+    print(f"Received comment: {comment_text}")
 
     if REPLY_PREFACE not in comment_text and detect_extension(comment_text):
-        print("Payload:", payload)
+        print("Extension detected:", payload)
 
         cloud_acct = extract_cloud_account(payload["cloud_account"])
         region = payload["cloud_account_region"]
