@@ -19,11 +19,22 @@ jira = JIRA(
 )
 
 def detect_extension(comment):
-    prompt = f"""You are a classifier. Decide if this Jira comment is asking
-    for a POC or workshop extension. Reply only with 'YES' or 'NO'.
+    prompt = f"""
+You are a classifier. Decide if this Jira comment is asking
+for a POC or workshop extension related to end dates or duration. 
 
-    Comment: {comment}
-    """
+- Reply only with 'YES' or 'NO'.
+- 'YES' if the comment explicitly asks to change, extend, or update the end date of a POC or workshop.
+- 'NO' if the comment is about capacity, quotas, budget, participants, or other unrelated details.
+
+Examples:
+1. "Can someone please update the POC end date to November 3rd?" -> YES
+2. "We have a sudden rush of participants, can we increase cloud budget?" -> NO
+3. "We would like to have this environment available until November 1st." -> YES
+4. "The workshop size is 40 people for 4 hours." -> NO
+
+Comment: {comment}
+"""
 
     response = openai.chat.completions.create(
         model="gpt-5-mini",
