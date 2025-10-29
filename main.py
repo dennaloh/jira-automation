@@ -113,6 +113,7 @@ async def jira_webhook(request: Request):
     payload = await request.json()
     comment_text = payload["comment"]
     print(f"Received comment: {comment_text}")
+    print(f"From: ", payload["author"])
 
     if REPLY_PREFACE not in comment_text and detect_extension(comment_text):
         print("Extension detected:", payload)
