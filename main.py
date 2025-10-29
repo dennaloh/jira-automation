@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 dotenv.load_dotenv()
 app = FastAPI()
 REPLY_PREFACE = "If you did not request for an extension, please ignore this message."
+GOES_emails = ["denna@cloudera.com", "akahan@cloudera.com", "rsuplina@cloudera.com", "ahennessy@cloudera.com", "therson@cloudera.com", "prashant.singh@cloudera.com", "jenright@cloudera.com"]
 
 cloudzero_api_key = os.getenv("CLOUDZERO_API_KEY")
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -113,9 +114,10 @@ async def jira_webhook(request: Request):
     payload = await request.json()
     comment_text = payload["comment"]
     print(f"Received comment: {comment_text}")
+    comment_author = payload["author"]
     print(f"From: ", payload["author"])
 
-    if REPLY_PREFACE not in comment_text and detect_extension(comment_text):
+    if REPLY_PREFACE not in comment_text and detect_extension(comment_text) and comment_author not in GOES_emails:
         print("Extension detected:", payload)
 
         cloud_acct = extract_cloud_account(payload["cloud_account"])
