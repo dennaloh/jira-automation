@@ -1,7 +1,0 @@
-{
-"key": "{{issue.key}}",
-"cloud_account": "{{issue.customfield_12645}}",
-"cloud_account_region": "{{issue.customfield_12646}}",
-"start_date": "{{issue.customfield_11432}}",
-"comment": {{comment.body.asJsonString}}
-}

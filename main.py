@@ -123,7 +123,7 @@ async def jira_webhook(request: Request):
         total_cost = get_cost_report(cloud_acct, region, start_date)
 
         region_text = f" in {region}" if region else ""
-        reply = f"Total spent so far for {cloud_acct}{region_text} since {start_date}: *${total_cost}*\nDo you need to request for a new budget?\n{REPLY_PREFACE}"
+        reply = f"Total spent to date for {cloud_acct}{region_text} since {start_date}: *${total_cost}*\nDo you need to request for a new budget?\n{REPLY_PREFACE}"
         
         issue_key = payload["key"]
         jira.add_comment(issue_key, reply)
