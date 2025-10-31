@@ -128,10 +128,10 @@ async def jira_webhook(request: Request):
         region_text = f" in {region}" if region else ""
         reply = f"Total spent to date for {cloud_acct}{region_text} since {start_date}: *${total_cost}*\nDo you need to request for a new budget?\n{REPLY_PREFACE}"
         
-        issue_key = payload["key"]
-        jira.add_comment(issue_key, reply)
-        print(datetime.now(), f"Added comment to {issue_key}")
+        # issue_key = payload["key"]
+        # jira.add_comment(issue_key, reply)
+        # print(datetime.now(), f"Added comment to {issue_key}")
 
-        return {"status": "comment added"}
+        return {"body": reply}
 
     return {"status": "ignored"}
