@@ -25,7 +25,10 @@ Custom Data:
 }
 ```
 
-## Run FastAPI app
+## FastAPI app
+Only comments if extension requested and comment is not from a member of the GOES team.
+
+## Run app
 To run app:
 ```
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
