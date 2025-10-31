@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 dotenv.load_dotenv()
 app = FastAPI()
 REPLY_PREFACE = "If you did not request for an extension, please ignore this message."
-GOES_emails = ["denna@cloudera.com", "akahan@cloudera.com", "rsuplina@cloudera.com", "ahennessy@cloudera.com", "therson@cloudera.com", "prashant.singh@cloudera.com", "jenright@cloudera.com"]
-
+GOES_emails = ["akahan@cloudera.com", "rsuplina@cloudera.com", "ahennessy@cloudera.com", "therson@cloudera.com", "prashant.singh@cloudera.com", "jenright@cloudera.com"]
+# "denna@cloudera.com", 
 cloudzero_api_key = os.getenv("CLOUDZERO_API_KEY")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 email = os.getenv("JIRA_EMAIL")
