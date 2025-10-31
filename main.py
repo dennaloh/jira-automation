@@ -132,6 +132,6 @@ async def jira_webhook(request: Request):
         # jira.add_comment(issue_key, reply)
         # print(datetime.now(), f"Added comment to {issue_key}")
 
-        return {"body": reply}
+        return reply
 
     return {"status": "ignored"}
