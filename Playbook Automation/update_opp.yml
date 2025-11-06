@@ -19,8 +19,8 @@
     set_fact:
       jira_jql: >
         project={{ jira_project }}
-        AND status="{{ jira_status }}"
         AND cf[11433] IS NOT EMPTY
+      # AND status="{{ jira_status }}"
       # AND component="{{ jira_component }}"
       # AND issuetype="{{ jira_issue_type }}"
 
