@@ -1,0 +1,178 @@
+---
+- name: Fetch CloudZero cloud costs for tickets in CDPAR JIRA
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    jira_base_url: "https://cloudera.atlassian.net"
+    jira_project: "CDPAR"
+    jira_status: "In Progress"
+    jira_component: "SE-Workshop"    
+    # NOTE: Below are in secrets.yml
+    # jira_api_token: 
+    # cloudzero_api_token:
+  vars_files:
+    - secrets.yml 
+  
+  tasks:
+
+############# JIRA tickets #############
+
+    - name: Fetch list of In Progress JIRA tickets for CDPAR workshops
+      community.general.jira:
+        uri: "{{ jira_base_url }}"
+        token: "{{ jira_api_token }}"
+        project: "{{ jira_project }}"
+        operation: "search"
+        maxresults: 10
+        jql: "project={{ jira_project}} AND status='{{ jira_status }}' AND component='{{ jira_component }}'"
+      args:
+        fields:
+          key:
+          customfield_18438:
+          customfield_18441:
+      register: jira_tickets_response
+
+############# Validate data in JIRA response #############
+
+    - name: Validate that all required fields are present
+      block:
+        - name: Find tickets where start date field is undefined
+          when: |
+            ( item.fields.customfield_18438 is undefined or
+            item.fields.customfield_18438 == None )
+          ansible.builtin.set_fact: 
+            tickets_undef_start_date: "{{ (tickets_undef_start_date | default([])) + [item.key] }}"
+          loop: "{{ jira_tickets_response.meta['issues'] }}"
+
+        - name: Find tickets where cloud account field is undefined
+          when: | 
+            ( item.fields.customfield_18441 is undefined or
+            item.fields.customfield_18441 == None )
+          ansible.builtin.set_fact: 
+            tickets_undef_cloud_account: "{{ (tickets_undef_cloud_account | default([])) + [item.key] }}"
+          loop: "{{ jira_tickets_response.meta['issues'] }}"
+       
+        - name: Find tickets where start date is after current date
+          when:
+            - item.key not in (tickets_undef_start_date | default([]))
+            - ((item.fields.customfield_18438 | ansible.builtin.to_datetime('%Y-%m-%d')) - (ansible_date_time.date | ansible.builtin.to_datetime('%Y-%m-%d'))).days > 0
+          ansible.builtin.set_fact:
+            tickets_not_yet_started: "{{ (tickets_not_yet_started | default([])) + [item.key] }}"
+          loop: "{{ jira_tickets_response.meta['issues'] }}"
+
+    - name: Extract valid tickets
+      when: 
+        - item.key not in (tickets_undef_cloud_account | default([]))
+        - item.key not in (tickets_undef_start_date | default([]))
+        - item.key not in (tickets_not_yet_started | default([]))
+      ansible.builtin.set_fact:
+        tickets_to_check: "{{ (tickets_to_check | default([])) + [ticket_detail]}}"
+      vars:
+        ticket_detail: 
+          key: "{{ item.key }}"
+          start_date: "{{ item.fields.customfield_18438 }}"
+          cloud_account_name: "{{ item.fields.customfield_18441 }}"
+      loop: "{{ jira_tickets_response.meta['issues'] }}"
+
+    # NOTE: Uncomment below to debug results
+    # - name: Print undefined tickets
+    #   debug:
+    #     msg:
+    #       - "tickets_undef_start_date is {{ tickets_undef_start_date | default([]) }}"
+    #       - "tickets_undef_cloud_account is {{ tickets_undef_cloud_account | default([]) }}"
+    #       - "tickets_not_yet_started is {{ tickets_not_yet_started | default([]) }}"
+
+    # - name: Print tickets to query
+    #   debug:
+    #     msg:
+    #       - "tickets_to_check is {{ tickets_to_check | default([]) }}"
+
+############# Prepare data and call for CloudZero Cost API #############
+
+    - name: Get cost data from CloudZero API
+      ansible.builtin.uri:
+        url: "https://api.cloudzero.com/v2/billing/costs?start_date={{ __start_date }}&end_date={{ __end_date }}&granularity={{ __granularity }}&group_by={{ __group_by }}&filters={{ __cloud_account_filter }}&cost_type={{ __cost_type }}"
+        method: GET
+        headers:
+          Authorization: "{{ cloudzero_api_token }}"
+          accept: application/json
+      vars:
+        __granularity: weekly
+        __cost_type: real_cost
+        __start_date: "{{ __ticket.start_date + 'T00:00:00Z' | urlencode }}"
+        __end_date: "{{ ansible_date_time.iso8601 | urlencode }}"
+        __group_by: "{{ 'User:Defined:AccountName' | urlencode }}"
+        __cloud_account_filter: "{{ {'User:Defined:AccountName': [__ticket.cloud_account_name] } | to_json | urlencode }}"
+      loop_control:
+        loop_var: __ticket
+      loop: "{{ tickets_to_check | default([]) }}"
+      register: __costdata
+     
+############# Process result data #############
+
+    - name: Set facts for costs of each ticket
+      ansible.builtin.set_fact:
+        cost_per_ticket: "{{ (cost_per_ticket | default([])) + [ticket_cost_detail] }}"
+      vars:
+        ticket_cost_detail:
+          ticket_id: "{{ __cost_item.__ticket.key }}"
+          start_date: "{{ __cost_item.__ticket.start_date }}"
+          weekly_cost: "{{ __cost_item.json.costs | map(attribute='cost') }}"
+          total_cost: "{{ __cost_item.json.costs | map(attribute='cost') | map('float')| sum}}"
+      loop_control:
+        loop_var: __cost_item
+      loop: "{{ __costdata.results }}"
+    
+    # NOTE: Uncomment below to debug results
+    # - name: Print each result item
+    #   debug:
+    #     var: cost_per_ticket
+
+  ############# Notifications #############
+
+    # ** Slack message about invalid tickets **
+    # Create message
+    - name: Send Slack alert for undefined data
+      when: |
+        ((tickets_undef_start_date | default([])) | length > 0) or ((tickets_undef_cloud_account | default([])) | length > 0)
+      block:
+      - name: Set summary message variable
+        ansible.builtin.set_fact:
+          cloud_cost_alert_msg: "*Workshop/PoC Cloud Cost Lookup Issues* \n\
+            {% if tickets_undef_start_date is defined %}\
+            Tickets without a start date: {{ tickets_undef_start_date | join(', ') }}
+            \n\
+            {% endif %}\
+            {% if tickets_undef_cloud_account is defined %}\
+            Tickets without a cloud account: {{ tickets_undef_cloud_account | join(', ') }}
+            {% endif %}"
+
+      - name: Send message to slack
+        community.general.slack:
+          token: "{{ alerts_slack_token }}"
+          channel: "{{ alerts_slack_channel }}"
+          msg: "{{ cloud_cost_alert_msg }}"
+          color: warning
+          username: 'Ansible'
+          icon_url: ''
+        register: slack_thread
+        # when: send_message_to_slack |  default(false) | bool
+
+      # - name: Debug message to Slack
+      #   ansible.builtin.debug:
+      #     var: cloud_cost_alert_msg
+
+  # ** Add comment to JIRA **
+    - name: Add comment about cloud cost to JIRA issue
+      community.general.jira:
+        uri: "{{ jira_base_url }}"
+        token: "{{ jira_api_token }}"
+        operation: comment
+        issue: '{{ __ticket_item.ticket_id }}'
+        timeout: 30
+        comment: |
+         h2. Cloud Cost update
+         The total cloud cost from {{ __ticket_item.start_date }} through {{ ansible_date_time.date }} is *${{ __ticket_item.total_cost | float | round(2, 'common') }}*.
+      loop_control:
+        loop_var: __ticket_item
+      loop: "{{ cost_per_ticket | default([]) }}"

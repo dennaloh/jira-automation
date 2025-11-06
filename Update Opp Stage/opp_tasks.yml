@@ -1,0 +1,33 @@
+############## Get data in JIRA response #############
+
+- name: Get opp link on issue
+  community.general.jira:
+    uri: "{{ jira_base_url }}"
+    username: "{{ jira_username }}"
+    password: "{{ jira_api_token }}"
+    project: "{{ jira_project }}"
+    operation: fetch
+    issue: "{{ jira_key }}"
+  register: issue
+
+- name: Extract Opportunity ID from Jira field
+  ansible.builtin.set_fact:
+    opp_id: "{{ (issue.meta.fields.customfield_11433 | regex_search('/Opportunity/([a-zA-Z0-9]+)/view', '\\1'))[0] }}"
+
+# - name: Get Opportunity info
+#   uri:
+#     url: "https://api.example.com/api/opportunity/version/4/do/read/id/{{ opp_id }}"
+#     method: GET
+#     headers:
+#       Authorization: "Bearer {{ salesforce_access_token }}"
+#       Accept: "application/json"
+#     return_content: yes
+#   register: opportunity_response
+
+# - name: Show Opportunity JSON
+#   ansible.builtin.debug:
+#     var: opportunity_response.json
+
+- name: Append Opp info to list
+  ansible.builtin.set_fact:
+    opp_status_list: "{{ opp_status_list + [ { jira_key : 'test' } ] }}"

@@ -1,0 +1,93 @@
+---
+- name: Fetch CloudZero cloud costs for tickets in CDPAR JIRA
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    jira_base_url: "https://cloudera.atlassian.net"
+    jira_project: "CDPAR"
+    jira_status: "In Progress"
+    jira_component: "SE-Workshop"
+    jira_issue_type: "POC or Workshop"
+    # NOTE: Below are in secrets.yml
+    # jira_api_token: 
+    # cloudzero_api_token:
+  vars_files:
+    - secrets.yml
+
+  tasks:
+  - name: Build JQL query
+    set_fact:
+      jira_jql: >
+        project={{ jira_project }}
+        AND status="{{ jira_status }}"
+        AND cf[11433] IS NOT EMPTY
+      # AND component="{{ jira_component }}"
+      # AND issuetype="{{ jira_issue_type }}"
+
+  - name: Fetch Jira tickets with Opp link
+    ansible.builtin.uri:
+      url: "{{ jira_base_url }}/rest/api/3/search/jql?jql={{ jira_jql | urlencode }}&maxResults=20&fields=*all,-comment"
+      method: GET
+      user: "{{ jira_username }}"
+      password: "{{ jira_api_token }}"
+      force_basic_auth: yes
+      headers:
+        Accept: "application/json"
+      return_content: yes
+    register: jira_tickets_response
+
+  - name: Set Jira issues ID fact
+    set_fact:
+      jira_issues: "{{ jira_tickets_response.json.issues }}"
+
+  - name: Initialize list for issue keys
+    ansible.builtin.set_fact:
+      keys_list: []
+
+  # - name: Append keys to list
+  #   ansible.builtin.set_fact:
+  #     keys_list: "{{ keys_list + [ item.key ] }}"
+  #   loop: "{{ jira_issues }}"
+
+  - name: Append keys to list
+    ansible.builtin.set_fact:
+      keys_list: "{{ keys_list + [ 'CDPAR-811' ] }}"
+
+  - name: Print Jira issues keys
+    ansible.builtin.debug:
+      var: keys_list
+
+  - name: Initialize list for opportunity stages
+    ansible.builtin.set_fact:
+      opp_status_list: []
+
+  - name: Loop through Jira issues and process each
+    include_tasks:
+      file: opp_tasks.yml
+    loop: "{{ keys_list }}"
+    loop_control:
+      loop_var: jira_key
+
+  - name: Show Opportunity Status List
+    ansible.builtin.debug:
+      var: opp_status_list
+
+  - name: Update Jira ticket Opp Won field
+    ansible.builtin.uri:
+      url: "{{ jira_base_url }}/rest/api/3/issue/{{ item.key }}"
+      method: PUT
+      user: "{{ jira_username }}"
+      password: "{{ jira_api_token }}"
+      force_basic_auth: yes
+      headers:
+        Accept: "application/json"
+        Content-Type: "application/json"
+      body: |
+        {
+          "fields": {
+            "customfield_11440": "{{ item.value }}"
+          }
+        }
+      body_format: json
+      status_code: 204  # Jira returns 204 for successful update
+    loop: "{{ opp_status_list | map('dict2items') | flatten }}"
